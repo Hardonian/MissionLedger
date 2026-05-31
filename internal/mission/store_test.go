@@ -93,3 +93,19 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 		t.Fatalf("expected degraded state, got %s", updated.State)
 	}
 }
+
+func TestHashPayload(t *testing.T) {
+	// Happy path
+	payload := map[string]string{"key": "value"}
+	hash := hashPayload(payload)
+	if hash == "unavailable" || hash == "" {
+		t.Errorf("expected valid hash, got %s", hash)
+	}
+
+	// Error path: channels cannot be marshaled to JSON
+	unmarshalable := make(chan int)
+	hashErr := hashPayload(unmarshalable)
+	if hashErr != "unavailable" {
+		t.Errorf("expected unavailable, got %s", hashErr)
+	}
+}
