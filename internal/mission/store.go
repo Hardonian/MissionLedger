@@ -198,7 +198,8 @@ func cloneMission(in Mission) Mission {
 	out := in
 	out.RequestedTools = copyStrings(in.RequestedTools)
 	out.ApprovedTools = copyStrings(in.ApprovedTools)
-	out.Events = make([]ProofEvent, len(in.Events))
-	copy(out.Events, in.Events)
+	if in.Events != nil {
+		out.Events = in.Events[:len(in.Events):len(in.Events)]
+	}
 	return out
 }
