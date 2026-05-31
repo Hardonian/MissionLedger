@@ -1,0 +1,15 @@
+🧪 [Add tests for API handlers]
+
+🎯 **What:** The testing gap addressed
+The `cmd/api/main.go` file was missing tests for its HTTP handlers. This commit adds a new test file `cmd/api/main_test.go` that tests the basic functionality, input validation, and proper routing of `handleHealthz`, `handleMissions`, and `handleMissionRoutes`.
+
+📊 **Coverage:** What scenarios are now tested
+- `GET /healthz` and `POST /healthz`
+- `POST /v1/missions` (valid and invalid payloads) and `GET /v1/missions`
+- `GET /v1/missions/{id}` for existing and non-existing missions
+- `POST /v1/missions/{id}/approve`
+- `POST /v1/missions/{id}/tool-calls`
+- `GET /v1/missions/{id}/proofpack`
+
+✨ **Result:** The improvement in test coverage
+The API handlers now have robust unit tests covering the standard HTTP request flows, ensuring any future refactoring can be done confidently without inadvertently breaking these endpoints.
