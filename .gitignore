@@ -1,0 +1,29 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+missionledger-api
+
+# Coverage / test output
+coverage.out
+*.test
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node / web
+web/node_modules/
+web/.next/
+web/out/
+
+# Local env / runtime
+.env
+.env.local
+.tmp/
+*.log
