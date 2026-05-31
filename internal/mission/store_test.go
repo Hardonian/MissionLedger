@@ -93,3 +93,16 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 		t.Fatalf("expected degraded state, got %s", updated.State)
 	}
 }
+
+func TestApproveMission_NotFound(t *testing.T) {
+	store := NewStore()
+
+	_, err := store.ApproveMission("non-existent-id", "human-1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	expected := "mission not found: non-existent-id"
+	if err.Error() != expected {
+		t.Fatalf("expected error %q, got %q", expected, err.Error())
+	}
+}
