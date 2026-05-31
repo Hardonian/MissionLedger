@@ -11,11 +11,11 @@ import (
 
 	"github.com/Hardonian/missionledger/internal/degraded"
 	"github.com/Hardonian/missionledger/internal/policy"
+	"github.com/google/uuid"
 )
 
 type Store struct {
 	mu       sync.RWMutex
-	seq      int
 	missions map[string]*Mission
 }
 
@@ -40,9 +40,8 @@ func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.seq++
 	now := time.Now().UTC()
-	id := fmt.Sprintf("mission-%04d", s.seq)
+	id := fmt.Sprintf("mission-%s", uuid.New().String())
 	m := &Mission{
 		ID:             id,
 		TenantID:       req.TenantID,
