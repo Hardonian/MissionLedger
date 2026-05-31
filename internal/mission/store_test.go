@@ -93,3 +93,29 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 		t.Fatalf("expected degraded state, got %s", updated.State)
 	}
 }
+
+func TestCreateMission_Validation(t *testing.T) {
+	store := NewStore()
+
+	// Test missing tenant_id
+	_, err := store.CreateMission(CreateRequest{
+		Objective: "Investigate an issue safely",
+	})
+	if err == nil {
+		t.Fatalf("expected error for missing tenant_id, got nil")
+	}
+	if err.Error() != "tenant_id is required" {
+		t.Fatalf("expected 'tenant_id is required', got %v", err)
+	}
+
+	// Test missing objective
+	_, err = store.CreateMission(CreateRequest{
+		TenantID: "tenant-1",
+	})
+	if err == nil {
+		t.Fatalf("expected error for missing objective, got nil")
+	}
+	if err.Error() != "objective is required" {
+		t.Fatalf("expected 'objective is required', got %v", err)
+	}
+}
