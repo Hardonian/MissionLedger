@@ -180,12 +180,12 @@ func hashPayload(payload interface{}) string {
 }
 
 func contains(items []string, wanted string) bool {
+	m := make(map[string]struct{}, len(items))
 	for _, item := range items {
-		if item == wanted {
-			return true
-		}
+		m[item] = struct{}{}
 	}
-	return false
+	_, ok := m[wanted]
+	return ok
 }
 
 func copyStrings(items []string) []string {
