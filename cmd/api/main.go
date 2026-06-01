@@ -81,7 +81,10 @@ func main() {
 	httpServer := &http.Server{
 		Addr:              ":" + port,
 		Handler:           mux,
+		ReadTimeout:       5 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 
 	log.Printf("missionledger api listening on :%s (storage=%s)", port, storage)
