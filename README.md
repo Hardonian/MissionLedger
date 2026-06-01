@@ -6,8 +6,8 @@ Current truth:
 - Local-first scaffold exists.
 - Go API exists and passes tests/build/smoke locally.
 - Policy engine is deterministic and intentionally simple: allow / escalate / deny.
-- Persistence is in-memory only right now.
-- Web console is planned but not yet wired into a running app.
+- Persistence is in-memory by default and PostgreSQL-backed when `DATABASE_URL` is set.
+- A read-only Next.js operator console now exists and renders real API data.
 
 This repo is for the wedge:
 - governed coding agents
@@ -18,6 +18,7 @@ This repo is for the wedge:
 
 API endpoints:
 - `GET /healthz`
+- `GET /v1/missions?limit=20`
 - `POST /v1/missions`
 - `GET /v1/missions/{id}`
 - `POST /v1/missions/{id}/approve`
@@ -31,13 +32,29 @@ Implemented behaviors:
 - hard denial for secret access and messaging tools
 - budget breach moves mission into degraded state
 - proof events with payload hashes and verification state
+- operator list view backed by live API data
+- automatic Postgres schema bootstrapping when database mode is enabled
 
 ## Quickstart
 
-Run the API:
+Run the API in memory mode:
 
 ```bash
 go run ./cmd/api
+```
+
+Run the API with PostgreSQL:
+
+```bash
+export DATABASE_URL=postgres://user:pass@127.0.0.1:5432/missionledger?sslmode=disable
+go run ./cmd/api
+```
+
+Run the operator console:
+
+```bash
+cd web
+MISSIONLEDGER_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 ```
 
 Run verification:
@@ -62,28 +79,30 @@ Run smoke demo only:
 6. Approved `terminal` use passes.
 7. Budget overrun is denied and the mission enters degraded state.
 8. Proofpack export shows the full chain.
+9. Operator console shows the mission, state, budget burn, and proof timeline.
 
 ## Repo map
 
 - `cmd/api` — HTTP API entrypoint
 - `cmd/seed` — demo payload generator
-- `internal/mission` — mission state and in-memory store
+- `internal/mission` — mission state, repository abstraction, in-memory store, and Postgres store
 - `internal/policy` — deterministic tool policy
 - `internal/degraded` — verification/degraded truth states
 - `docs/` — positioning, architecture, demo, personas
+- `migrations/` — SQL schema for Postgres mode
 - `scripts/` — verify and smoke workflows
+- `web/` — Next.js operator console
 - `examples/` — example governed-agent wedges
 - `.hermes/` — repo-local operator memory and verification docs
 
 ## Known gaps
 
-- No database yet
 - No auth yet
-- No tenancy enforcement beyond data fields
+- No tenancy enforcement beyond stored fields
 - No real tool mediation process yet; current API simulates governed tool calls
-- No running Next.js console yet
-- No GitHub remote yet
+- Operator console is read-only and currently focuses on the newest mission detail
+- No deployment/runtime target yet
 
 ## Next milestone
 
-Replace in-memory storage with Postgres, add a real tool-gateway abstraction, and build a minimal operator console that visualizes missions, approvals, proof events, and degraded states.
+Keep the API honest while adding tenant enforcement, a real tool-gateway abstraction, approval actions from the operator console, and proofpack export flows that can leave the local dev box without losing deterministic truth.
