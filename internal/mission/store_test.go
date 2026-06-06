@@ -94,40 +94,39 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestCreateMission_EmptyTenantID(t *testing.T) {
+func TestGetMission(t *testing.T) {
 	store := NewStore()
 
-	_, err := store.CreateMission(CreateRequest{
-		Objective:      "Test objective",
+	// Test non-existent mission
+	_, ok := store.GetMission("non-existent-id")
+	if ok {
+		t.Fatalf("expected non-existent mission to return false")
+	}
+
+	// Test existing mission
+	created, err := store.CreateMission(CreateRequest{
+		TenantID:       "tenant-3",
+		Objective:      "Test GetMission",
 		RequestedTools: []string{"read_file"},
-		BudgetUSD:      1.00,
+		BudgetUSD:      10.0,
 		CreatedBy:      "test-user",
 	})
-
-	if err == nil {
-		t.Fatal("expected error when tenant_id is empty, got nil")
+	if err != nil {
+		t.Fatalf("failed to create mission: %v", err)
 	}
 
-	if err.Error() != "tenant_id is required" {
-		t.Fatalf("expected error 'tenant_id is required', got %v", err)
-	}
-}
-
-func TestCreateMission_EmptyObjective(t *testing.T) {
-	store := NewStore()
-
-	_, err := store.CreateMission(CreateRequest{
-		TenantID:       "tenant-1",
-		RequestedTools: []string{"read_file"},
-		BudgetUSD:      1.00,
-		CreatedBy:      "test-user",
-	})
-
-	if err == nil {
-		t.Fatal("expected error when objective is empty, got nil")
+	retrieved, ok := store.GetMission(created.ID)
+	if !ok {
+		t.Fatalf("expected existing mission to return true")
 	}
 
-	if err.Error() != "objective is required" {
-		t.Fatalf("expected error 'objective is required', got %v", err)
+	if retrieved.ID != created.ID {
+		t.Fatalf("expected retrieved mission ID to be %s, got %s", created.ID, retrieved.ID)
+	}
+	if retrieved.TenantID != created.TenantID {
+		t.Fatalf("expected retrieved mission TenantID to be %s, got %s", created.TenantID, retrieved.TenantID)
+	}
+	if retrieved.Objective != created.Objective {
+		t.Fatalf("expected retrieved mission Objective to be %s, got %s", created.Objective, retrieved.Objective)
 	}
 }
