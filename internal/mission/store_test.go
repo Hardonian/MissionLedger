@@ -93,3 +93,18 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 		t.Fatalf("expected degraded state, got %s", updated.State)
 	}
 }
+
+func TestCreateMission_EmptyTenantID(t *testing.T) {
+	store := NewStore()
+
+	_, err := store.CreateMission(CreateRequest{
+		TenantID:  "",
+		Objective: "Test empty tenant ID",
+	})
+	if err == nil {
+		t.Fatal("expected error when tenant_id is empty, got nil")
+	}
+	if err.Error() != "tenant_id is required" {
+		t.Fatalf("expected error message 'tenant_id is required', got '%v'", err)
+	}
+}
