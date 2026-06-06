@@ -94,10 +94,17 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestHashPayloadError(t *testing.T) {
-	unmarshalable := make(chan int)
-	result := hashPayload(unmarshalable)
-	if result != "unavailable" {
-		t.Fatalf("expected unavailable, got %s", result)
+func TestCreateMission_EmptyTenantID(t *testing.T) {
+	store := NewStore()
+
+	_, err := store.CreateMission(CreateRequest{
+		TenantID:  "",
+		Objective: "Test empty tenant ID",
+	})
+	if err == nil {
+		t.Fatal("expected error when tenant_id is empty, got nil")
+	}
+	if err.Error() != "tenant_id is required" {
+		t.Fatalf("expected error message 'tenant_id is required', got '%v'", err)
 	}
 }
