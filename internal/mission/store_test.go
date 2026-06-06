@@ -93,3 +93,11 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 		t.Fatalf("expected degraded state, got %s", updated.State)
 	}
 }
+
+func TestHashPayloadError(t *testing.T) {
+	unmarshalable := make(chan int)
+	result := hashPayload(unmarshalable)
+	if result != "unavailable" {
+		t.Fatalf("expected unavailable, got %s", result)
+	}
+}
