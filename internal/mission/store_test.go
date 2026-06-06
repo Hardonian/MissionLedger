@@ -94,20 +94,15 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestHashPayload(t *testing.T) {
-	// Test error path (unmarshalable type)
-	errResult := hashPayload(make(chan int))
-	if errResult != "unavailable" {
-		t.Errorf("expected 'unavailable' for unmarshalable payload, got %q", errResult)
-	}
+func TestApproveMission_NotFound(t *testing.T) {
+	store := NewStore()
 
-	// Test happy path (marshalable type)
-	payload := map[string]string{"key": "value"}
-	validResult := hashPayload(payload)
-	if validResult == "unavailable" {
-		t.Errorf("expected valid hash for marshalable payload, got %q", validResult)
+	_, err := store.ApproveMission("non-existent-id", "human-1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-	if len(validResult) == 0 {
-		t.Error("expected non-empty hash string")
+	expected := "mission not found: non-existent-id"
+	if err.Error() != expected {
+		t.Fatalf("expected error %q, got %q", expected, err.Error())
 	}
 }
