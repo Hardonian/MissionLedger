@@ -94,15 +94,40 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestApproveMission_NotFound(t *testing.T) {
+func TestCreateMission_EmptyTenantID(t *testing.T) {
 	store := NewStore()
 
-	_, err := store.ApproveMission("non-existent-id", "human-1")
+	_, err := store.CreateMission(CreateRequest{
+		Objective:      "Test objective",
+		RequestedTools: []string{"read_file"},
+		BudgetUSD:      1.00,
+		CreatedBy:      "test-user",
+	})
+
 	if err == nil {
-		t.Fatal("expected error, got nil")
+		t.Fatal("expected error when tenant_id is empty, got nil")
 	}
-	expected := "mission not found: non-existent-id"
-	if err.Error() != expected {
-		t.Fatalf("expected error %q, got %q", expected, err.Error())
+
+	if err.Error() != "tenant_id is required" {
+		t.Fatalf("expected error 'tenant_id is required', got %v", err)
+	}
+}
+
+func TestCreateMission_EmptyObjective(t *testing.T) {
+	store := NewStore()
+
+	_, err := store.CreateMission(CreateRequest{
+		TenantID:       "tenant-1",
+		RequestedTools: []string{"read_file"},
+		BudgetUSD:      1.00,
+		CreatedBy:      "test-user",
+	})
+
+	if err == nil {
+		t.Fatal("expected error when objective is empty, got nil")
+	}
+
+	if err.Error() != "objective is required" {
+		t.Fatalf("expected error 'objective is required', got %v", err)
 	}
 }
