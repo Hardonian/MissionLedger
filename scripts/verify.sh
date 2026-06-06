@@ -12,5 +12,11 @@ mkdir -p .tmp
 echo "==> go build -o .tmp/missionledger-api ./cmd/api"
 go build -o .tmp/missionledger-api ./cmd/api
 
+echo "==> npm --prefix web ci"
+npm --prefix web ci
+
+echo "==> npm --prefix web run build"
+npm --prefix web run build
+
 echo "==> ./scripts/smoke.sh"
 ./scripts/smoke.sh

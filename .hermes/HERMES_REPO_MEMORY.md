@@ -4,9 +4,11 @@ Repo identity:
 - Name: MissionLedger
 - Purpose: governed agent execution substrate
 - Local path: /mnt/c/Users/scott/GitHub/MissionLedger
+- Remote: https://github.com/Hardonian/MissionLedger
 
 Current durable truths:
-- Repo is local-only and has no remote yet.
-- Go API scaffold is real and locally verified.
+- Initial scaffold exists locally and is pushed to GitHub.
+- Smoke path previously demonstrated the core wedge credibly.
 - Policy decisions are currently static code.
-- Smoke path demonstrates the core wedge credibly enough for early research.
+- A broader local draft for PostgreSQL persistence and a Next.js operator console exists in the working tree but is not yet re-verified, committed, or pushed.
+- Local business-ops artifacts now live at /mnt/c/Users/scott/GitHub/.hermes-business-ops/MissionLedger/
