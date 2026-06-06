@@ -161,20 +161,7 @@ func (s *apiServer) handleMissionRoutes(w http.ResponseWriter, r *http.Request) 
 	missionID := parts[0]
 
 	if len(parts) == 1 {
-		if r.Method != http.MethodGet {
-			writeMethodNotAllowed(w)
-			return
-		}
-		m, ok, err := s.store.GetMission(missionID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		if !ok {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "mission not found"})
-			return
-		}
-		writeJSON(w, http.StatusOK, m)
+		s.handleMissionGet(w, r, missionID)
 		return
 	}
 
@@ -185,76 +172,97 @@ func (s *apiServer) handleMissionRoutes(w http.ResponseWriter, r *http.Request) 
 
 	switch parts[1] {
 	case "approve":
-		if r.Method != http.MethodPost {
-			writeMethodNotAllowed(w)
-			return
-		}
-		var req approveMissionRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid json body"})
-			return
-		}
-		updated, err := s.store.ApproveMission(missionID, req.ApprovedBy)
-		if err != nil {
-			status := http.StatusBadRequest
-			if strings.Contains(err.Error(), "not found") {
-				status = http.StatusNotFound
-			}
-			writeJSON(w, status, errorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, updated)
+		s.handleMissionApprove(w, r, missionID)
 	case "tool-calls":
-		if r.Method != http.MethodPost {
-			writeMethodNotAllowed(w)
-			return
-		}
-		var req toolCallRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid json body"})
-			return
-		}
-		result, updated, err := s.store.RecordToolCall(missionID, mission.ToolCallRequest{
-			ToolName: req.ToolName,
-			ActorID:  req.ActorID,
-			CostUSD:  req.CostUSD,
-			Metadata: req.Metadata,
-		})
-		if err != nil {
-			status := http.StatusBadRequest
-			if strings.Contains(err.Error(), "not found") {
-				status = http.StatusNotFound
-			}
-			writeJSON(w, status, errorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"result":  result,
-			"mission": updated,
-		})
+		s.handleMissionToolCalls(w, r, missionID)
 	case "proofpack":
-		if r.Method != http.MethodGet {
-			writeMethodNotAllowed(w)
-			return
-		}
-		m, ok, err := s.store.GetMission(missionID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-		if !ok {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "mission not found"})
-			return
-		}
-		resp := proofpackResponse{Mission: m}
-		resp.Summary.EventCount = len(m.Events)
-		resp.Summary.BudgetUSD = m.BudgetUSD
-		resp.Summary.BudgetUsedUSD = m.BudgetUsedUSD
-		resp.Summary.BudgetRemainUSD = m.BudgetUSD - m.BudgetUsedUSD
-		writeJSON(w, http.StatusOK, resp)
+		s.handleMissionProofpack(w, r, missionID)
 	default:
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "not found"})
 	}
+}
+
+func (s *apiServer) handleMissionGet(w http.ResponseWriter, r *http.Request, missionID string) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	m, ok := s.store.GetMission(missionID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "mission not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *apiServer) handleMissionApprove(w http.ResponseWriter, r *http.Request, missionID string) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	var req approveMissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid json body"})
+		return
+	}
+	updated, err := s.store.ApproveMission(missionID, req.ApprovedBy)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, errorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *apiServer) handleMissionToolCalls(w http.ResponseWriter, r *http.Request, missionID string) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	var req toolCallRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid json body"})
+		return
+	}
+	result, updated, err := s.store.RecordToolCall(missionID, mission.ToolCallRequest{
+		ToolName: req.ToolName,
+		ActorID:  req.ActorID,
+		CostUSD:  req.CostUSD,
+		Metadata: req.Metadata,
+	})
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, errorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"result":  result,
+		"mission": updated,
+	})
+}
+
+func (s *apiServer) handleMissionProofpack(w http.ResponseWriter, r *http.Request, missionID string) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	m, ok := s.store.GetMission(missionID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "mission not found"})
+		return
+	}
+	resp := proofpackResponse{Mission: m}
+	resp.Summary.EventCount = len(m.Events)
+	resp.Summary.BudgetUSD = m.BudgetUSD
+	resp.Summary.BudgetUsedUSD = m.BudgetUsedUSD
+	resp.Summary.BudgetRemainUSD = m.BudgetUSD - m.BudgetUsedUSD
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {
