@@ -159,7 +159,7 @@ func (s *apiServer) handleMissionRoutes(w http.ResponseWriter, r *http.Request) 
 	missionID := parts[0]
 
 	if len(parts) == 1 {
-		s.handleGetMission(w, r, missionID)
+		s.handleMissionGet(w, r, missionID)
 		return
 	}
 
@@ -180,7 +180,7 @@ func (s *apiServer) handleMissionRoutes(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (s *apiServer) handleGetMission(w http.ResponseWriter, r *http.Request, missionID string) {
+func (s *apiServer) handleMissionGet(w http.ResponseWriter, r *http.Request, missionID string) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
 		return
