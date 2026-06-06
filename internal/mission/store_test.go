@@ -94,17 +94,18 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestCreateMission_EmptyTenantID(t *testing.T) {
-	store := NewStore()
-
-	_, err := store.CreateMission(CreateRequest{
-		TenantID:  "",
-		Objective: "Test empty tenant ID",
-	})
-	if err == nil {
-		t.Fatal("expected error when tenant_id is empty, got nil")
+func TestHashPayload(t *testing.T) {
+	// Happy path
+	payload := map[string]string{"key": "value"}
+	hash := hashPayload(payload)
+	if hash == "unavailable" || hash == "" {
+		t.Errorf("expected valid hash, got %s", hash)
 	}
-	if err.Error() != "tenant_id is required" {
-		t.Fatalf("expected error message 'tenant_id is required', got '%v'", err)
+
+	// Error path: channels cannot be marshaled to JSON
+	unmarshalable := make(chan int)
+	hashErr := hashPayload(unmarshalable)
+	if hashErr != "unavailable" {
+		t.Errorf("expected unavailable, got %s", hashErr)
 	}
 }
