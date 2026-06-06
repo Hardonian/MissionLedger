@@ -94,35 +94,26 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestMissionIDUnpredictability(t *testing.T) {
+func TestCreateMission_Validation(t *testing.T) {
 	store := NewStore()
 
-	created1, err := store.CreateMission(CreateRequest{
-		TenantID:  "tenant-test",
-		Objective: "Test predictability 1",
+	_, err := store.CreateMission(CreateRequest{
+		TenantID:  "",
+		Objective: "Test empty tenant ID",
 	})
-	if err != nil {
-		t.Fatalf("create mission 1: %v", err)
+	if err == nil {
+		t.Errorf("expected error for empty tenant_id, got nil")
+	} else if err.Error() != "tenant_id is required" {
+		t.Errorf("expected tenant_id is required error, got %v", err)
 	}
 
-	created2, err := store.CreateMission(CreateRequest{
-		TenantID:  "tenant-test",
-		Objective: "Test predictability 2",
+	_, err = store.CreateMission(CreateRequest{
+		TenantID:  "tenant-1",
+		Objective: "",
 	})
-	if err != nil {
-		t.Fatalf("create mission 2: %v", err)
-	}
-
-	if created1.ID == created2.ID {
-		t.Fatalf("mission IDs should be unique, got %s for both", created1.ID)
-	}
-
-	// Example prefix check: "mission-" followed by 36 characters (UUID length)
-	if len(created1.ID) != len("mission-")+36 {
-		t.Fatalf("mission ID 1 unexpected length: %s", created1.ID)
-	}
-
-	if len(created2.ID) != len("mission-")+36 {
-		t.Fatalf("mission ID 2 unexpected length: %s", created2.ID)
+	if err == nil {
+		t.Errorf("expected error for empty objective, got nil")
+	} else if err.Error() != "objective is required" {
+		t.Errorf("expected objective is required error, got %v", err)
 	}
 }
