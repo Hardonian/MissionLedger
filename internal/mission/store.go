@@ -12,11 +12,11 @@ import (
 
 	"github.com/Hardonian/missionledger/internal/degraded"
 	"github.com/Hardonian/missionledger/internal/policy"
+	"github.com/google/uuid"
 )
 
 type Store struct {
 	mu       sync.RWMutex
-	seq      int
 	missions map[string]*Mission
 }
 
@@ -129,7 +129,8 @@ func validateToolCallRequest(req ToolCallRequest) error {
 	return nil
 }
 
-func initializeMission(id string, req CreateRequest, now time.Time) *Mission {
+	now := time.Now().UTC()
+	id := fmt.Sprintf("mission-%s", uuid.New().String())
 	m := &Mission{
 		ID:             id,
 		TenantID:       req.TenantID,

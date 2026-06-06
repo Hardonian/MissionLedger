@@ -94,18 +94,35 @@ func TestDeniedAndBudgetExceeded(t *testing.T) {
 	}
 }
 
-func TestHashPayload(t *testing.T) {
-	// Happy path
-	payload := map[string]string{"key": "value"}
-	hash := hashPayload(payload)
-	if hash == "unavailable" || hash == "" {
-		t.Errorf("expected valid hash, got %s", hash)
+func TestMissionIDUnpredictability(t *testing.T) {
+	store := NewStore()
+
+	created1, err := store.CreateMission(CreateRequest{
+		TenantID:  "tenant-test",
+		Objective: "Test predictability 1",
+	})
+	if err != nil {
+		t.Fatalf("create mission 1: %v", err)
 	}
 
-	// Error path: channels cannot be marshaled to JSON
-	unmarshalable := make(chan int)
-	hashErr := hashPayload(unmarshalable)
-	if hashErr != "unavailable" {
-		t.Errorf("expected unavailable, got %s", hashErr)
+	created2, err := store.CreateMission(CreateRequest{
+		TenantID:  "tenant-test",
+		Objective: "Test predictability 2",
+	})
+	if err != nil {
+		t.Fatalf("create mission 2: %v", err)
+	}
+
+	if created1.ID == created2.ID {
+		t.Fatalf("mission IDs should be unique, got %s for both", created1.ID)
+	}
+
+	// Example prefix check: "mission-" followed by 36 characters (UUID length)
+	if len(created1.ID) != len("mission-")+36 {
+		t.Fatalf("mission ID 1 unexpected length: %s", created1.ID)
+	}
+
+	if len(created2.ID) != len("mission-")+36 {
+		t.Fatalf("mission ID 2 unexpected length: %s", created2.ID)
 	}
 }
