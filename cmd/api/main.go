@@ -78,17 +78,15 @@ func main() {
 	mux.HandleFunc("/v1/missions", srv.handleMissions)
 	mux.HandleFunc("/v1/missions/", srv.handleMissionRoutes)
 
-	httpServer := &http.Server{
-		Addr:              ":" + port,
-		Handler:           mux,
-		ReadTimeout:       5 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       30 * time.Second,
+	log.Printf("missionledger api listening on :%s", port)
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
-
-	log.Printf("missionledger api listening on :%s (storage=%s)", port, storage)
-	if err := httpServer.ListenAndServe(); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
