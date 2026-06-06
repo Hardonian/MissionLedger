@@ -119,15 +119,14 @@ func normalizeCreateRequest(req *CreateRequest) error {
 	return nil
 }
 
-func validateToolCallRequest(req ToolCallRequest) error {
-	if req.ToolName == "" {
-		return errors.New("tool_name is required")
-	}
-	if req.CostUSD < 0 {
-		return errors.New("cost_usd must be zero or greater")
-	}
-	return nil
-}
+	payloadHash := hashPayload(map[string]interface{}{
+		"objective":       req.Objective,
+		"requested_tools": req.RequestedTools,
+		"budget_usd":      req.BudgetUSD,
+	})
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	now := time.Now().UTC()
 	id := fmt.Sprintf("mission-%s", uuid.New().String())
@@ -146,11 +145,7 @@ func validateToolCallRequest(req ToolCallRequest) error {
 		Events:         []ProofEvent{},
 	}
 
-	addEvent(m, "mission.created", "user", req.CreatedBy, map[string]interface{}{
-		"objective":       req.Objective,
-		"requested_tools": req.RequestedTools,
-		"budget_usd":      req.BudgetUSD,
-	}, "allow", "", 0, degraded.StateVerified, "mission created")
+	s.addEvent(m, "mission.created", "user", req.CreatedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission created")
 
 	return m
 }
@@ -166,42 +161,51 @@ func applyApproval(m *Mission, approvedBy string) {
 	m.ApprovedAt = &now
 	m.ApprovedTools = copyStrings(m.RequestedTools)
 
-	addEvent(m, "mission.approved", "human", approvedBy, map[string]interface{}{
+	payloadHash := hashPayload(map[string]interface{}{
 		"approved_tools": m.ApprovedTools,
-	}, "allow", "", 0, degraded.StateVerified, "mission approved for risky tools")
+	})
+
+	s.addEvent(m, "mission.approved", "human", approvedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission approved for risky tools")
+
+	return cloneMission(*m), nil
 }
 
-func applyToolCall(m *Mission, req ToolCallRequest) ToolCallResult {
+func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, Mission, error) {
 	if req.ActorID == "" {
 		req.ActorID = "agent"
 	}
-	if req.Metadata == nil {
-		req.Metadata = map[string]interface{}{}
-	}
-
+	payloadHash := hashPayload(req.Metadata)
 	decision := policy.Decide(req.ToolName)
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.missions[id]
+	if !ok {
+		return ToolCallResult{}, Mission{}, fmt.Errorf("mission not found: %s", id)
+	}
+
 	if !contains(m.RequestedTools, req.ToolName) {
-		addEvent(m, "tool.denied", "agent", req.ActorID, req.Metadata, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
-		return ToolCallResult{Decision: "deny", Reason: "tool is outside mission scope"}
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
+		return ToolCallResult{Decision: "deny", Reason: "tool is outside mission scope"}, cloneMission(*m), nil
 	}
 
 	if decision.Decision == policy.DecisionDeny {
-		addEvent(m, "tool.denied", "agent", req.ActorID, req.Metadata, string(decision.Decision), req.ToolName, 0, degraded.StateDenied, decision.Reason)
-		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, string(decision.Decision), req.ToolName, 0, degraded.StateDenied, decision.Reason)
+		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}, cloneMission(*m), nil
 	}
 
 	requiresApproval := decision.Decision == policy.DecisionEscalate && !contains(m.ApprovedTools, req.ToolName)
 	if requiresApproval {
 		m.State = StateWaitingApproval
-		addEvent(m, "tool.escalated", "agent", req.ActorID, req.Metadata, string(decision.Decision), req.ToolName, 0, degraded.StatePartial, decision.Reason)
-		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}
+		s.addEvent(m, "tool.escalated", "agent", req.ActorID, payloadHash, string(decision.Decision), req.ToolName, 0, degraded.StatePartial, decision.Reason)
+		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}, cloneMission(*m), nil
 	}
 
 	if m.BudgetUSD > 0 && m.BudgetUsedUSD+req.CostUSD > m.BudgetUSD {
 		m.State = StateDegraded
-		addEvent(m, "budget.exceeded", "agent", req.ActorID, req.Metadata, "deny", req.ToolName, 0, degraded.StateUnavailable, "budget cap exceeded")
-		return ToolCallResult{Decision: "deny", Reason: "budget cap exceeded"}
+		s.addEvent(m, "budget.exceeded", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateUnavailable, "budget cap exceeded")
+		return ToolCallResult{Decision: "deny", Reason: "budget cap exceeded"}, cloneMission(*m), nil
 	}
 
 	m.BudgetUsedUSD += req.CostUSD
@@ -210,17 +214,17 @@ func applyToolCall(m *Mission, req ToolCallRequest) ToolCallResult {
 	if decision.Decision == policy.DecisionEscalate && contains(m.ApprovedTools, req.ToolName) {
 		reason = "tool use allowed after explicit approval"
 	}
-	addEvent(m, "tool.allowed", "agent", req.ActorID, req.Metadata, "allow", req.ToolName, req.CostUSD, degraded.StateVerified, reason)
-	return ToolCallResult{Decision: "allow", Reason: reason}
+	s.addEvent(m, "tool.allowed", "agent", req.ActorID, payloadHash, "allow", req.ToolName, req.CostUSD, degraded.StateVerified, reason)
+	return ToolCallResult{Decision: "allow", Reason: reason}, cloneMission(*m), nil
 }
 
-func addEvent(m *Mission, eventType, actorType, actorID string, payload interface{}, policyDecision, toolName string, spendDelta float64, verificationState degraded.VerificationState, reason string) {
+func (s *Store) addEvent(m *Mission, eventType, actorType, actorID string, payloadHash string, policyDecision, toolName string, spendDelta float64, verificationState degraded.VerificationState, reason string) {
 	event := ProofEvent{
 		Sequence:          len(m.Events) + 1,
 		EventType:         eventType,
 		ActorType:         actorType,
 		ActorID:           actorID,
-		PayloadHash:       hashPayload(payload),
+		PayloadHash:       payloadHash,
 		PolicyDecision:    policyDecision,
 		ToolName:          toolName,
 		SpendDelta:        spendDelta,
