@@ -10,171 +10,286 @@ import (
 	"github.com/Hardonian/missionledger/internal/mission"
 )
 
-func setupTestServer() (*apiServer, *http.ServeMux) {
-	srv := &apiServer{store: mission.NewStore()}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", srv.handleHealthz)
-	mux.HandleFunc("/v1/missions", srv.handleMissions)
-	mux.HandleFunc("/v1/missions/", srv.handleMissionRoutes)
-	return srv, mux
-}
-
 func TestHandleHealthz(t *testing.T) {
-	_, mux := setupTestServer()
+	srv := &apiServer{store: mission.NewStore()}
 
-	t.Run("GET returns 200 OK", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+	// Test GET method
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rr := httptest.NewRecorder()
+	srv.handleHealthz(rr, req)
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
 
-		var resp map[string]string
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-		if status, ok := resp["status"]; !ok || status != "ok" {
-			t.Errorf("expected status 'ok', got %v", status)
-		}
-	})
+	expected := `{"status":"ok"}` + "\n"
+	if rr.Body.String() != expected {
+		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
+	}
 
-	t.Run("POST returns 405 Method Not Allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+	// Test non-GET method
+	req = httptest.NewRequest(http.MethodPost, "/healthz", nil)
+	rr = httptest.NewRecorder()
+	srv.handleHealthz(rr, req)
 
-		if rr.Code != http.StatusMethodNotAllowed {
-			t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
-		}
-	})
+	if status := rr.Code; status != http.StatusMethodNotAllowed {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusMethodNotAllowed)
+	}
 }
 
 func TestHandleMissions(t *testing.T) {
-	_, mux := setupTestServer()
+	srv := &apiServer{store: mission.NewStore()}
 
-	t.Run("POST returns 201 Created", func(t *testing.T) {
-		payload := createMissionRequest{
-			TenantID:       "tenant-1",
-			Objective:      "Test objective",
-			RequestedTools: []string{"read_file"},
-			BudgetUSD:      10.0,
-			CreatedBy:      "user-1",
+	// Test valid POST
+	payload := createMissionRequest{
+		TenantID:       "tenant-1",
+		Objective:      "Test mission",
+		RequestedTools: []string{"read_file"},
+		BudgetUSD:      10.0,
+		CreatedBy:      "test-user",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v1/missions", bytes.NewBuffer(body))
+	rr := httptest.NewRecorder()
+	srv.handleMissions(rr, req)
+
+	if status := rr.Code; status != http.StatusCreated {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
+	}
+
+	var resp mission.Mission
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.TenantID != payload.TenantID {
+		t.Errorf("expected tenant ID %s, got %s", payload.TenantID, resp.TenantID)
+	}
+
+	// Test non-POST method
+	req = httptest.NewRequest(http.MethodGet, "/v1/missions", nil)
+	rr = httptest.NewRecorder()
+	srv.handleMissions(rr, req)
+
+	if status := rr.Code; status != http.StatusMethodNotAllowed {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusMethodNotAllowed)
+	}
+
+	// Test invalid JSON
+	req = httptest.NewRequest(http.MethodPost, "/v1/missions", bytes.NewBufferString("invalid json"))
+	rr = httptest.NewRecorder()
+	srv.handleMissions(rr, req)
+
+	if status := rr.Code; status != http.StatusBadRequest {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
+	}
+}
+
+func TestHandleMissionRoutes(t *testing.T) {
+	srv := &apiServer{store: mission.NewStore()}
+
+	// Create a mission for testing
+	m, _ := srv.store.CreateMission(mission.CreateRequest{
+		TenantID:       "tenant-1",
+		Objective:      "Test mission",
+		RequestedTools: []string{"read_file"},
+		BudgetUSD:      10.0,
+		CreatedBy:      "test-user",
+	})
+
+	t.Run("GET /v1/missions/{id}", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/missions/"+m.ID, nil)
+		rr := httptest.NewRecorder()
+		srv.handleMissionRoutes(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		}
+	})
+
+	t.Run("GET /v1/missions/{id} Not Found", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/missions/non-existent-id", nil)
+		rr := httptest.NewRecorder()
+		srv.handleMissionRoutes(rr, req)
+
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+
+	t.Run("POST /v1/missions/{id}/approve", func(t *testing.T) {
+		payload := approveMissionRequest{ApprovedBy: "approver-1"}
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/v1/missions/"+m.ID+"/approve", bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		srv.handleMissionRoutes(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		}
+	})
+
+	t.Run("POST /v1/missions/{id}/tool-calls", func(t *testing.T) {
+		payload := toolCallRequest{
+			ToolName: "read_file",
+			ActorID:  "actor-1",
+			CostUSD:  1.0,
 		}
 		body, _ := json.Marshal(payload)
-
-		req := httptest.NewRequest(http.MethodPost, "/v1/missions", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/v1/missions/"+m.ID+"/tool-calls", bytes.NewBuffer(body))
 		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+		srv.handleMissionRoutes(rr, req)
 
-		if rr.Code != http.StatusCreated {
-			t.Errorf("expected status %d, got %d. Body: %s", http.StatusCreated, rr.Code, rr.Body.String())
-		}
-
-		var resp mission.Mission
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-		if resp.ID == "" {
-			t.Errorf("expected mission ID to be set")
-		}
-		if resp.Objective != payload.Objective {
-			t.Errorf("expected objective %q, got %q", payload.Objective, resp.Objective)
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 		}
 	})
 
-	t.Run("GET returns 405 Method Not Allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/missions", nil)
+	t.Run("GET /v1/missions/{id}/proofpack", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/missions/"+m.ID+"/proofpack", nil)
 		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+		srv.handleMissionRoutes(rr, req)
 
-		if rr.Code != http.StatusMethodNotAllowed {
-			t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 		}
 	})
 
-	t.Run("POST with invalid JSON returns 400 Bad Request", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/v1/missions", bytes.NewReader([]byte("{invalid-json}")))
+	t.Run("Invalid Route", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/missions/"+m.ID+"/invalid", nil)
 		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+		srv.handleMissionRoutes(rr, req)
 
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
 		}
 	})
 }
 
-func TestHandleMissionRoutes(t *testing.T) {
-	srv, mux := setupTestServer()
+func TestHandleMissions_CreateError(t *testing.T) {
+	srv := &apiServer{store: mission.NewStore()}
 
-	// Create a mission for use in these tests
-	created, _ := srv.store.CreateMission(mission.CreateRequest{
+	// Test invalid payload (empty objective will trigger an error from the store)
+	payload := createMissionRequest{
 		TenantID:       "tenant-1",
-		Objective:      "Test",
+		Objective:      "", // Missing objective should fail
 		RequestedTools: []string{"read_file"},
 		BudgetUSD:      10.0,
-		CreatedBy:      "user-1",
+		CreatedBy:      "test-user",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v1/missions", bytes.NewBuffer(body))
+	rr := httptest.NewRecorder()
+	srv.handleMissions(rr, req)
+
+	if status := rr.Code; status != http.StatusBadRequest {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
+	}
+}
+
+func TestHandleMissionRoutes_InvalidJSONs(t *testing.T) {
+	srv := &apiServer{store: mission.NewStore()}
+	m, _ := srv.store.CreateMission(mission.CreateRequest{
+		TenantID:       "tenant-1",
+		Objective:      "Test mission",
+		RequestedTools: []string{"read_file"},
+		BudgetUSD:      10.0,
+		CreatedBy:      "test-user",
 	})
 
-	t.Run("GET existing mission returns 200 OK", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/missions/"+created.ID, nil)
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+	// Test approve invalid JSON
+	req := httptest.NewRequest(http.MethodPost, "/v1/missions/"+m.ID+"/approve", bytes.NewBufferString("invalid json"))
+	rr := httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusBadRequest {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
+	}
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-	})
+	// Test approve wrong method
+	req = httptest.NewRequest(http.MethodGet, "/v1/missions/"+m.ID+"/approve", nil)
+	rr = httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusMethodNotAllowed {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusMethodNotAllowed)
+	}
 
-	t.Run("GET non-existent mission returns 404 Not Found", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/missions/does-not-exist", nil)
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+	// Test tool-calls invalid JSON
+	req = httptest.NewRequest(http.MethodPost, "/v1/missions/"+m.ID+"/tool-calls", bytes.NewBufferString("invalid json"))
+	rr = httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusBadRequest {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
+	}
 
-		if rr.Code != http.StatusNotFound {
-			t.Errorf("expected status %d, got %d", http.StatusNotFound, rr.Code)
-		}
-	})
+	// Test tool-calls wrong method
+	req = httptest.NewRequest(http.MethodGet, "/v1/missions/"+m.ID+"/tool-calls", nil)
+	rr = httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusMethodNotAllowed {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusMethodNotAllowed)
+	}
 
-	t.Run("POST approve returns 200 OK", func(t *testing.T) {
-		payload := approveMissionRequest{ApprovedBy: "approver-1"}
-		body, _ := json.Marshal(payload)
+	// Test proofpack wrong method
+	req = httptest.NewRequest(http.MethodPost, "/v1/missions/"+m.ID+"/proofpack", nil)
+	rr = httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusMethodNotAllowed {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusMethodNotAllowed)
+	}
+}
 
-		req := httptest.NewRequest(http.MethodPost, "/v1/missions/"+created.ID+"/approve", bytes.NewReader(body))
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+func TestHandleMissionRoutes_BaseRouteErrors(t *testing.T) {
+	srv := &apiServer{store: mission.NewStore()}
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected status %d, got %d. Body: %s", http.StatusOK, rr.Code, rr.Body.String())
-		}
-	})
+	// Test empty path after trimming
+	req := httptest.NewRequest(http.MethodGet, "/v1/missions/", nil)
+	rr := httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusNotFound {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+	}
 
-	t.Run("POST tool-calls returns 200 OK", func(t *testing.T) {
-		payload := toolCallRequest{
-			ToolName: "read_file",
-			ActorID:  "agent-1",
-			CostUSD:  0.01,
-			Metadata: map[string]interface{}{"path": "test.txt"},
-		}
-		body, _ := json.Marshal(payload)
+	// Test GET base mission with wrong method
+	req = httptest.NewRequest(http.MethodPost, "/v1/missions/mission-0001", bytes.NewBufferString("{}"))
+	rr = httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusMethodNotAllowed {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusMethodNotAllowed)
+	}
+}
 
-		req := httptest.NewRequest(http.MethodPost, "/v1/missions/"+created.ID+"/tool-calls", bytes.NewReader(body))
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected status %d, got %d. Body: %s", http.StatusOK, rr.Code, rr.Body.String())
-		}
-	})
+func TestHandleMissionRoutes_Errors(t *testing.T) {
+	srv := &apiServer{store: mission.NewStore()}
 
-	t.Run("GET proofpack returns 200 OK", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/missions/"+created.ID+"/proofpack", nil)
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
+	// Test Approve on non-existent mission
+	payload := approveMissionRequest{ApprovedBy: "approver-1"}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v1/missions/non-existent/approve", bytes.NewBuffer(body))
+	rr := httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusNotFound {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+	}
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-	})
+	// Test ToolCall on non-existent mission
+	tcPayload := toolCallRequest{
+		ToolName: "read_file",
+		ActorID:  "actor-1",
+		CostUSD:  1.0,
+	}
+	tcBody, _ := json.Marshal(tcPayload)
+	req = httptest.NewRequest(http.MethodPost, "/v1/missions/non-existent/tool-calls", bytes.NewBuffer(tcBody))
+	rr = httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusNotFound {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+	}
+
+	// Test too many path parts
+	req = httptest.NewRequest(http.MethodGet, "/v1/missions/mission-1/approve/extra", nil)
+	rr = httptest.NewRecorder()
+	srv.handleMissionRoutes(rr, req)
+	if status := rr.Code; status != http.StatusNotFound {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+	}
 }
