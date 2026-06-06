@@ -135,7 +135,9 @@ func normalizeCreateRequest(req *CreateRequest) error {
 		TenantID:       req.TenantID,
 		Objective:      req.Objective,
 		RequestedTools: copyStrings(req.RequestedTools),
+		requestedMap:   buildMap(req.RequestedTools),
 		ApprovedTools:  []string{},
+		approvedMap:    buildMap([]string{}),
 		AuthorityLevel: "L1",
 		BudgetUSD:      req.BudgetUSD,
 		TimeoutSeconds: 900,
@@ -160,6 +162,7 @@ func applyApproval(m *Mission, approvedBy string) {
 	m.ApprovedBy = approvedBy
 	m.ApprovedAt = &now
 	m.ApprovedTools = copyStrings(m.RequestedTools)
+	m.approvedMap = buildMap(m.RequestedTools)
 
 	payloadHash := hashPayload(map[string]interface{}{
 		"approved_tools": m.ApprovedTools,
@@ -185,8 +188,14 @@ func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, 
 		return ToolCallResult{}, Mission{}, fmt.Errorf("mission not found: %s", id)
 	}
 
-	if !contains(m.RequestedTools, req.ToolName) {
-		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
+	if req.ActorID == "" {
+		req.ActorID = "agent"
+	}
+
+	decision := policy.Decide(req.ToolName)
+
+	if !containsMap(m.requestedMap, req.ToolName) {
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, req.Metadata, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
 		return ToolCallResult{Decision: "deny", Reason: "tool is outside mission scope"}, cloneMission(*m), nil
 	}
 
@@ -195,7 +204,7 @@ func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, 
 		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}, cloneMission(*m), nil
 	}
 
-	requiresApproval := decision.Decision == policy.DecisionEscalate && !contains(m.ApprovedTools, req.ToolName)
+	requiresApproval := decision.Decision == policy.DecisionEscalate && !containsMap(m.approvedMap, req.ToolName)
 	if requiresApproval {
 		m.State = StateWaitingApproval
 		s.addEvent(m, "tool.escalated", "agent", req.ActorID, payloadHash, string(decision.Decision), req.ToolName, 0, degraded.StatePartial, decision.Reason)
@@ -211,7 +220,7 @@ func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, 
 	m.BudgetUsedUSD += req.CostUSD
 	m.State = StateRunning
 	reason := decision.Reason
-	if decision.Decision == policy.DecisionEscalate && contains(m.ApprovedTools, req.ToolName) {
+	if decision.Decision == policy.DecisionEscalate && containsMap(m.approvedMap, req.ToolName) {
 		reason = "tool use allowed after explicit approval"
 	}
 	s.addEvent(m, "tool.allowed", "agent", req.ActorID, payloadHash, "allow", req.ToolName, req.CostUSD, degraded.StateVerified, reason)
@@ -244,15 +253,6 @@ func hashPayload(payload interface{}) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func contains(items []string, wanted string) bool {
-	m := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		m[item] = struct{}{}
-	}
-	_, ok := m[wanted]
-	return ok
-}
-
 func copyStrings(items []string) []string {
 	out := make([]string, len(items))
 	copy(out, items)
@@ -262,8 +262,23 @@ func copyStrings(items []string) []string {
 func cloneMission(in Mission) Mission {
 	out := in
 	out.RequestedTools = copyStrings(in.RequestedTools)
+	out.requestedMap = buildMap(in.RequestedTools)
 	out.ApprovedTools = copyStrings(in.ApprovedTools)
+	out.approvedMap = buildMap(in.ApprovedTools)
 	out.Events = make([]ProofEvent, len(in.Events))
 	copy(out.Events, in.Events)
 	return out
+}
+
+func buildMap(items []string) map[string]struct{} {
+	m := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		m[item] = struct{}{}
+	}
+	return m
+}
+
+func containsMap(m map[string]struct{}, wanted string) bool {
+	_, ok := m[wanted]
+	return ok
 }
