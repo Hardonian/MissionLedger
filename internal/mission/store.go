@@ -6,16 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/Hardonian/missionledger/internal/degraded"
 	"github.com/Hardonian/missionledger/internal/policy"
+	"github.com/google/uuid"
 )
 
 type Store struct {
 	mu       sync.RWMutex
-	seq      int
 	missions map[string]*Mission
 }
 
@@ -24,11 +25,90 @@ func NewStore() *Store {
 }
 
 func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
+	if err := normalizeCreateRequest(&req); err != nil {
+		return Mission{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.seq++
+	id := fmt.Sprintf("mission-%04d", s.seq)
+	m := initializeMission(id, req, time.Now().UTC())
+	s.missions[id] = m
+	return cloneMission(*m), nil
+}
+
+func (s *Store) GetMission(id string) (Mission, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	m, ok := s.missions[id]
+	if !ok {
+		return Mission{}, false, nil
+	}
+	return cloneMission(*m), true, nil
+}
+
+func (s *Store) ListMissions(limit int) ([]Mission, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	missions := make([]Mission, 0, len(s.missions))
+	for _, item := range s.missions {
+		missions = append(missions, cloneMission(*item))
+	}
+
+	sort.Slice(missions, func(i, j int) bool {
+		return missions[i].CreatedAt.After(missions[j].CreatedAt)
+	})
+
+	if limit > 0 && len(missions) > limit {
+		missions = missions[:limit]
+	}
+
+	return missions, nil
+}
+
+func (s *Store) ApproveMission(id, approvedBy string) (Mission, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.missions[id]
+	if !ok {
+		return Mission{}, fmt.Errorf("mission not found: %s", id)
+	}
+
+	applyApproval(m, approvedBy)
+	return cloneMission(*m), nil
+}
+
+func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, Mission, error) {
+	if err := validateToolCallRequest(req); err != nil {
+		return ToolCallResult{}, Mission{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.missions[id]
+	if !ok {
+		return ToolCallResult{}, Mission{}, fmt.Errorf("mission not found: %s", id)
+	}
+
+	result := applyToolCall(m, req)
+	return result, cloneMission(*m), nil
+}
+
+func normalizeCreateRequest(req *CreateRequest) error {
 	if req.TenantID == "" {
-		return Mission{}, errors.New("tenant_id is required")
+		return errors.New("tenant_id is required")
 	}
 	if req.Objective == "" {
-		return Mission{}, errors.New("objective is required")
+		return errors.New("objective is required")
+	}
+	if req.BudgetUSD < 0 {
+		return errors.New("budget_usd must be zero or greater")
 	}
 	if req.CreatedBy == "" {
 		req.CreatedBy = "unknown"
@@ -36,13 +116,20 @@ func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
 	if len(req.RequestedTools) == 0 {
 		req.RequestedTools = []string{"read_file"}
 	}
+	return nil
+}
+
+	payloadHash := hashPayload(map[string]interface{}{
+		"objective":       req.Objective,
+		"requested_tools": req.RequestedTools,
+		"budget_usd":      req.BudgetUSD,
+	})
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.seq++
 	now := time.Now().UTC()
-	id := fmt.Sprintf("mission-%04d", s.seq)
+	id := fmt.Sprintf("mission-%s", uuid.New().String())
 	m := &Mission{
 		ID:             id,
 		TenantID:       req.TenantID,
@@ -58,38 +145,14 @@ func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
 		Events:         []ProofEvent{},
 	}
 
-	s.addEvent(m, "mission.created", "user", req.CreatedBy, map[string]interface{}{
-		"objective":       req.Objective,
-		"requested_tools": req.RequestedTools,
-		"budget_usd":      req.BudgetUSD,
-	}, "allow", "", 0, degraded.StateVerified, "mission created")
+	s.addEvent(m, "mission.created", "user", req.CreatedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission created")
 
-	s.missions[id] = m
-	return cloneMission(*m), nil
+	return m
 }
 
-func (s *Store) GetMission(id string) (Mission, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	m, ok := s.missions[id]
-	if !ok {
-		return Mission{}, false
-	}
-	return cloneMission(*m), true
-}
-
-func (s *Store) ApproveMission(id, approvedBy string) (Mission, error) {
+func applyApproval(m *Mission, approvedBy string) {
 	if approvedBy == "" {
 		approvedBy = "unknown-approver"
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.missions[id]
-	if !ok {
-		return Mission{}, fmt.Errorf("mission not found: %s", id)
 	}
 
 	now := time.Now().UTC()
@@ -98,14 +161,22 @@ func (s *Store) ApproveMission(id, approvedBy string) (Mission, error) {
 	m.ApprovedAt = &now
 	m.ApprovedTools = copyStrings(m.RequestedTools)
 
-	s.addEvent(m, "mission.approved", "human", approvedBy, map[string]interface{}{
+	payloadHash := hashPayload(map[string]interface{}{
 		"approved_tools": m.ApprovedTools,
-	}, "allow", "", 0, degraded.StateVerified, "mission approved for risky tools")
+	})
+
+	s.addEvent(m, "mission.approved", "human", approvedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission approved for risky tools")
 
 	return cloneMission(*m), nil
 }
 
 func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, Mission, error) {
+	if req.ActorID == "" {
+		req.ActorID = "agent"
+	}
+	payloadHash := hashPayload(req.Metadata)
+	decision := policy.Decide(req.ToolName)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -114,32 +185,26 @@ func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, 
 		return ToolCallResult{}, Mission{}, fmt.Errorf("mission not found: %s", id)
 	}
 
-	if req.ActorID == "" {
-		req.ActorID = "agent"
-	}
-
-	decision := policy.Decide(req.ToolName)
-
 	if !contains(m.RequestedTools, req.ToolName) {
-		s.addEvent(m, "tool.denied", "agent", req.ActorID, req.Metadata, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
 		return ToolCallResult{Decision: "deny", Reason: "tool is outside mission scope"}, cloneMission(*m), nil
 	}
 
 	if decision.Decision == policy.DecisionDeny {
-		s.addEvent(m, "tool.denied", "agent", req.ActorID, req.Metadata, string(decision.Decision), req.ToolName, 0, degraded.StateDenied, decision.Reason)
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, string(decision.Decision), req.ToolName, 0, degraded.StateDenied, decision.Reason)
 		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}, cloneMission(*m), nil
 	}
 
 	requiresApproval := decision.Decision == policy.DecisionEscalate && !contains(m.ApprovedTools, req.ToolName)
 	if requiresApproval {
 		m.State = StateWaitingApproval
-		s.addEvent(m, "tool.escalated", "agent", req.ActorID, req.Metadata, string(decision.Decision), req.ToolName, 0, degraded.StatePartial, decision.Reason)
+		s.addEvent(m, "tool.escalated", "agent", req.ActorID, payloadHash, string(decision.Decision), req.ToolName, 0, degraded.StatePartial, decision.Reason)
 		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}, cloneMission(*m), nil
 	}
 
 	if m.BudgetUSD > 0 && m.BudgetUsedUSD+req.CostUSD > m.BudgetUSD {
 		m.State = StateDegraded
-		s.addEvent(m, "budget.exceeded", "agent", req.ActorID, req.Metadata, "deny", req.ToolName, 0, degraded.StateUnavailable, "budget cap exceeded")
+		s.addEvent(m, "budget.exceeded", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateUnavailable, "budget cap exceeded")
 		return ToolCallResult{Decision: "deny", Reason: "budget cap exceeded"}, cloneMission(*m), nil
 	}
 
@@ -149,17 +214,17 @@ func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, 
 	if decision.Decision == policy.DecisionEscalate && contains(m.ApprovedTools, req.ToolName) {
 		reason = "tool use allowed after explicit approval"
 	}
-	s.addEvent(m, "tool.allowed", "agent", req.ActorID, req.Metadata, "allow", req.ToolName, req.CostUSD, degraded.StateVerified, reason)
+	s.addEvent(m, "tool.allowed", "agent", req.ActorID, payloadHash, "allow", req.ToolName, req.CostUSD, degraded.StateVerified, reason)
 	return ToolCallResult{Decision: "allow", Reason: reason}, cloneMission(*m), nil
 }
 
-func (s *Store) addEvent(m *Mission, eventType, actorType, actorID string, payload interface{}, policyDecision, toolName string, spendDelta float64, verificationState degraded.VerificationState, reason string) {
+func (s *Store) addEvent(m *Mission, eventType, actorType, actorID string, payloadHash string, policyDecision, toolName string, spendDelta float64, verificationState degraded.VerificationState, reason string) {
 	event := ProofEvent{
 		Sequence:          len(m.Events) + 1,
 		EventType:         eventType,
 		ActorType:         actorType,
 		ActorID:           actorID,
-		PayloadHash:       hashPayload(payload),
+		PayloadHash:       payloadHash,
 		PolicyDecision:    policyDecision,
 		ToolName:          toolName,
 		SpendDelta:        spendDelta,
