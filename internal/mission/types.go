@@ -23,11 +23,13 @@ const (
 )
 
 type Mission struct {
-	ID             string       `json:"id"`
-	TenantID       string       `json:"tenant_id"`
-	Objective      string       `json:"objective"`
-	RequestedTools []string     `json:"requested_tools"`
-	ApprovedTools  []string     `json:"approved_tools"`
+	ID             string   `json:"id"`
+	TenantID       string   `json:"tenant_id"`
+	Objective      string   `json:"objective"`
+	RequestedTools []string `json:"requested_tools"`
+	requestedMap   map[string]struct{}
+	ApprovedTools  []string `json:"approved_tools"`
+	approvedMap    map[string]struct{}
 	AuthorityLevel string       `json:"authority_level"`
 	BudgetUSD      float64      `json:"budget_usd"`
 	BudgetUsedUSD  float64      `json:"budget_used_usd"`
