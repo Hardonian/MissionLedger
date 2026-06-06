@@ -6,16 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/Hardonian/missionledger/internal/degraded"
 	"github.com/Hardonian/missionledger/internal/policy"
+	"github.com/google/uuid"
 )
 
 type Store struct {
 	mu       sync.RWMutex
-	seq      int
 	missions map[string]*Mission
 }
 
@@ -24,11 +25,90 @@ func NewStore() *Store {
 }
 
 func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
+	if err := normalizeCreateRequest(&req); err != nil {
+		return Mission{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.seq++
+	id := fmt.Sprintf("mission-%04d", s.seq)
+	m := initializeMission(id, req, time.Now().UTC())
+	s.missions[id] = m
+	return cloneMission(*m), nil
+}
+
+func (s *Store) GetMission(id string) (Mission, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	m, ok := s.missions[id]
+	if !ok {
+		return Mission{}, false, nil
+	}
+	return cloneMission(*m), true, nil
+}
+
+func (s *Store) ListMissions(limit int) ([]Mission, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	missions := make([]Mission, 0, len(s.missions))
+	for _, item := range s.missions {
+		missions = append(missions, cloneMission(*item))
+	}
+
+	sort.Slice(missions, func(i, j int) bool {
+		return missions[i].CreatedAt.After(missions[j].CreatedAt)
+	})
+
+	if limit > 0 && len(missions) > limit {
+		missions = missions[:limit]
+	}
+
+	return missions, nil
+}
+
+func (s *Store) ApproveMission(id, approvedBy string) (Mission, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.missions[id]
+	if !ok {
+		return Mission{}, fmt.Errorf("mission not found: %s", id)
+	}
+
+	applyApproval(m, approvedBy)
+	return cloneMission(*m), nil
+}
+
+func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, Mission, error) {
+	if err := validateToolCallRequest(req); err != nil {
+		return ToolCallResult{}, Mission{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.missions[id]
+	if !ok {
+		return ToolCallResult{}, Mission{}, fmt.Errorf("mission not found: %s", id)
+	}
+
+	result := applyToolCall(m, req)
+	return result, cloneMission(*m), nil
+}
+
+func normalizeCreateRequest(req *CreateRequest) error {
 	if req.TenantID == "" {
-		return Mission{}, errors.New("tenant_id is required")
+		return errors.New("tenant_id is required")
 	}
 	if req.Objective == "" {
-		return Mission{}, errors.New("objective is required")
+		return errors.New("objective is required")
+	}
+	if req.BudgetUSD < 0 {
+		return errors.New("budget_usd must be zero or greater")
 	}
 	if req.CreatedBy == "" {
 		req.CreatedBy = "unknown"
@@ -36,6 +116,8 @@ func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
 	if len(req.RequestedTools) == 0 {
 		req.RequestedTools = []string{"read_file"}
 	}
+	return nil
+}
 
 	payloadHash := hashPayload(map[string]interface{}{
 		"objective":       req.Objective,
@@ -46,9 +128,8 @@ func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.seq++
 	now := time.Now().UTC()
-	id := fmt.Sprintf("mission-%04d", s.seq)
+	id := fmt.Sprintf("mission-%s", uuid.New().String())
 	m := &Mission{
 		ID:             id,
 		TenantID:       req.TenantID,
@@ -66,32 +147,12 @@ func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
 
 	s.addEvent(m, "mission.created", "user", req.CreatedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission created")
 
-	s.missions[id] = m
-	return cloneMission(*m), nil
+	return m
 }
 
-func (s *Store) GetMission(id string) (Mission, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	m, ok := s.missions[id]
-	if !ok {
-		return Mission{}, false
-	}
-	return cloneMission(*m), true
-}
-
-func (s *Store) ApproveMission(id, approvedBy string) (Mission, error) {
+func applyApproval(m *Mission, approvedBy string) {
 	if approvedBy == "" {
 		approvedBy = "unknown-approver"
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.missions[id]
-	if !ok {
-		return Mission{}, fmt.Errorf("mission not found: %s", id)
 	}
 
 	now := time.Now().UTC()
