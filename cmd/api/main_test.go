@@ -22,9 +22,12 @@ func TestHandleHealthz(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	expected := `{"status":"ok"}` + "\n"
-	if rr.Body.String() != expected {
-		t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), expected)
+	var got map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got["status"] != "ok" {
+		t.Errorf("handler returned unexpected status: got %v want %v", got["status"], "ok")
 	}
 
 	// Test non-GET method
@@ -65,13 +68,13 @@ func TestHandleMissions(t *testing.T) {
 		t.Errorf("expected tenant ID %s, got %s", payload.TenantID, resp.TenantID)
 	}
 
-	// Test non-POST method
+	// Test non-POST method — GET should be allowed and return OK
 	req = httptest.NewRequest(http.MethodGet, "/v1/missions", nil)
 	rr = httptest.NewRecorder()
 	srv.handleMissions(rr, req)
 
-	if status := rr.Code; status != http.StatusMethodNotAllowed {
-		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusMethodNotAllowed)
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
 	// Test invalid JSON

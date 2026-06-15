@@ -12,12 +12,12 @@ import (
 
 	"github.com/Hardonian/missionledger/internal/degraded"
 	"github.com/Hardonian/missionledger/internal/policy"
-	"github.com/google/uuid"
 )
 
 type Store struct {
 	mu       sync.RWMutex
 	missions map[string]*Mission
+	seq      int
 }
 
 func NewStore() *Store {
@@ -34,7 +34,7 @@ func (s *Store) CreateMission(req CreateRequest) (Mission, error) {
 
 	s.seq++
 	id := fmt.Sprintf("mission-%04d", s.seq)
-	m := initializeMission(id, req, time.Now().UTC())
+	m := s.initializeMission(id, req, time.Now().UTC())
 	s.missions[id] = m
 	return cloneMission(*m), nil
 }
@@ -79,7 +79,7 @@ func (s *Store) ApproveMission(id, approvedBy string) (Mission, error) {
 		return Mission{}, fmt.Errorf("mission not found: %s", id)
 	}
 
-	applyApproval(m, approvedBy)
+	s.applyApproval(m, approvedBy)
 	return cloneMission(*m), nil
 }
 
@@ -96,8 +96,7 @@ func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, 
 		return ToolCallResult{}, Mission{}, fmt.Errorf("mission not found: %s", id)
 	}
 
-	result := applyToolCall(m, req)
-	return result, cloneMission(*m), nil
+	return s.applyToolCall(m, req)
 }
 
 func normalizeCreateRequest(req *CreateRequest) error {
@@ -119,17 +118,13 @@ func normalizeCreateRequest(req *CreateRequest) error {
 	return nil
 }
 
+func (s *Store) initializeMission(id string, req CreateRequest, now time.Time) *Mission {
 	payloadHash := hashPayload(map[string]interface{}{
 		"objective":       req.Objective,
 		"requested_tools": req.RequestedTools,
 		"budget_usd":      req.BudgetUSD,
 	})
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now().UTC()
-	id := fmt.Sprintf("mission-%s", uuid.New().String())
 	m := &Mission{
 		ID:             id,
 		TenantID:       req.TenantID,
@@ -152,7 +147,7 @@ func normalizeCreateRequest(req *CreateRequest) error {
 	return m
 }
 
-func applyApproval(m *Mission, approvedBy string) {
+func (s *Store) applyApproval(m *Mission, approvedBy string) {
 	if approvedBy == "" {
 		approvedBy = "unknown-approver"
 	}
@@ -169,33 +164,17 @@ func applyApproval(m *Mission, approvedBy string) {
 	})
 
 	s.addEvent(m, "mission.approved", "human", approvedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission approved for risky tools")
-
-	return cloneMission(*m), nil
 }
 
-func (s *Store) RecordToolCall(id string, req ToolCallRequest) (ToolCallResult, Mission, error) {
+func (s *Store) applyToolCall(m *Mission, req ToolCallRequest) (ToolCallResult, Mission, error) {
 	if req.ActorID == "" {
 		req.ActorID = "agent"
 	}
 	payloadHash := hashPayload(req.Metadata)
 	decision := policy.Decide(req.ToolName)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.missions[id]
-	if !ok {
-		return ToolCallResult{}, Mission{}, fmt.Errorf("mission not found: %s", id)
-	}
-
-	if req.ActorID == "" {
-		req.ActorID = "agent"
-	}
-
-	decision := policy.Decide(req.ToolName)
-
 	if !containsMap(m.requestedMap, req.ToolName) {
-		s.addEvent(m, "tool.denied", "agent", req.ActorID, req.Metadata, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
 		return ToolCallResult{Decision: "deny", Reason: "tool is outside mission scope"}, cloneMission(*m), nil
 	}
 
@@ -281,4 +260,17 @@ func buildMap(items []string) map[string]struct{} {
 func containsMap(m map[string]struct{}, wanted string) bool {
 	_, ok := m[wanted]
 	return ok
+}
+
+func validateToolCallRequest(req ToolCallRequest) error {
+	if req.ActorID == "" {
+		return errors.New("actor_id is required")
+	}
+	if req.ToolName == "" {
+		return errors.New("tool_name is required")
+	}
+	if req.CostUSD < 0 {
+		return errors.New("cost_usd must be zero or greater")
+	}
+	return nil
 }

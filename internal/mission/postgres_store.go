@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Hardonian/missionledger/internal/degraded"
+	"github.com/Hardonian/missionledger/internal/policy"
 )
 
 type PostgresStore struct {
@@ -44,7 +45,7 @@ func (s *PostgresStore) CreateMission(req CreateRequest) (Mission, error) {
 	}
 
 	id := fmt.Sprintf("mission-%04d", seq)
-	m := initializeMission(id, req, time.Now().UTC())
+	m := s.initializeMission(id, req, time.Now().UTC())
 	if err := insertMissionTx(tx, m); err != nil {
 		return Mission{}, err
 	}
@@ -124,7 +125,7 @@ func (s *PostgresStore) ApproveMission(id, approvedBy string) (Mission, error) {
 	}
 
 	before := len(m.Events)
-	applyApproval(&m, approvedBy)
+	s.applyApproval(&m, approvedBy)
 	if err := updateMissionTx(tx, &m); err != nil {
 		return Mission{}, err
 	}
@@ -159,11 +160,14 @@ func (s *PostgresStore) RecordToolCall(id string, req ToolCallRequest) (ToolCall
 	}
 
 	before := len(m.Events)
-	result := applyToolCall(&m, req)
-	if err := updateMissionTx(tx, &m); err != nil {
+	result, updatedMission, err := s.applyToolCall(&m, req)
+	if err != nil {
 		return ToolCallResult{}, Mission{}, err
 	}
-	if err := insertEventsTx(tx, m.ID, m.Events[before:]); err != nil {
+	if err := updateMissionTx(tx, &updatedMission); err != nil {
+		return ToolCallResult{}, Mission{}, err
+	}
+	if err := insertEventsTx(tx, updatedMission.ID, updatedMission.Events[before:]); err != nil {
 		return ToolCallResult{}, Mission{}, err
 	}
 
@@ -388,14 +392,119 @@ func nullableString(value string) interface{} {
 	return value
 }
 
-func nullableTime(value *time.Time) interface{} {
-	if value == nil {
-		return nil
+func (s *PostgresStore) initializeMission(id string, req CreateRequest, now time.Time) *Mission {
+	payloadHash := hashPayload(map[string]interface{}{
+		"objective":       req.Objective,
+		"requested_tools": req.RequestedTools,
+		"budget_usd":      req.BudgetUSD,
+	})
+
+	m := &Mission{
+		ID:             id,
+		TenantID:       req.TenantID,
+		Objective:      req.Objective,
+		RequestedTools: copyStrings(req.RequestedTools),
+		requestedMap:   buildMap(req.RequestedTools),
+		ApprovedTools:  []string{},
+		approvedMap:    buildMap([]string{}),
+		AuthorityLevel: "L1",
+		BudgetUSD:      req.BudgetUSD,
+		TimeoutSeconds: 900,
+		State:          StateCreated,
+		CreatedBy:      req.CreatedBy,
+		CreatedAt:      now,
+		Events:         []ProofEvent{},
 	}
-	return *value
+
+	s.addEvent(m, "mission.created", "user", req.CreatedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission created")
+
+	return m
 }
 
-const postgresSchema = `
+func (s *PostgresStore) applyApproval(m *Mission, approvedBy string) {
+	if approvedBy == "" {
+		approvedBy = "unknown-approver"
+	}
+
+	now := time.Now().UTC()
+	m.State = StateApproved
+	m.ApprovedBy = approvedBy
+	m.ApprovedAt = &now
+	m.ApprovedTools = copyStrings(m.RequestedTools)
+	m.approvedMap = buildMap(m.RequestedTools)
+
+	payloadHash := hashPayload(map[string]interface{}{
+		"approved_tools": m.ApprovedTools,
+	})
+
+	s.addEvent(m, "mission.approved", "human", approvedBy, payloadHash, "allow", "", 0, degraded.StateVerified, "mission approved for risky tools")
+}
+
+func (s *PostgresStore) applyToolCall(m *Mission, req ToolCallRequest) (ToolCallResult, Mission, error) {
+	if req.ActorID == "" {
+		req.ActorID = "agent"
+	}
+	payloadHash := hashPayload(req.Metadata)
+	decision := policy.Decide(req.ToolName)
+
+	if !containsMap(m.requestedMap, req.ToolName) {
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateDenied, "tool is outside mission scope")
+		return ToolCallResult{Decision: "deny", Reason: "tool is outside mission scope"}, cloneMission(*m), nil
+	}
+
+	if decision.Decision == policy.DecisionDeny {
+		s.addEvent(m, "tool.denied", "agent", req.ActorID, payloadHash, string(decision.Decision), req.ToolName, 0, degraded.StateDenied, decision.Reason)
+		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}, cloneMission(*m), nil
+	}
+
+	requiresApproval := decision.Decision == policy.DecisionEscalate && !containsMap(m.approvedMap, req.ToolName)
+	if requiresApproval {
+		m.State = StateWaitingApproval
+		s.addEvent(m, "tool.escalated", "agent", req.ActorID, payloadHash, string(decision.Decision), req.ToolName, 0, degraded.StatePartial, decision.Reason)
+		return ToolCallResult{Decision: string(decision.Decision), Reason: decision.Reason}, cloneMission(*m), nil
+	}
+
+	if m.BudgetUSD > 0 && m.BudgetUsedUSD+req.CostUSD > m.BudgetUSD {
+		m.State = StateDegraded
+		s.addEvent(m, "budget.exceeded", "agent", req.ActorID, payloadHash, "deny", req.ToolName, 0, degraded.StateUnavailable, "budget cap exceeded")
+		return ToolCallResult{Decision: "deny", Reason: "budget cap exceeded"}, cloneMission(*m), nil
+	}
+
+	m.BudgetUsedUSD += req.CostUSD
+	m.State = StateRunning
+	reason := decision.Reason
+	if decision.Decision == policy.DecisionEscalate && containsMap(m.approvedMap, req.ToolName) {
+		reason = "tool use allowed after explicit approval"
+	}
+	s.addEvent(m, "tool.allowed", "agent", req.ActorID, payloadHash, "allow", req.ToolName, req.CostUSD, degraded.StateVerified, reason)
+	return ToolCallResult{Decision: "allow", Reason: reason}, cloneMission(*m), nil
+}
+
+func (s *PostgresStore) addEvent(m *Mission, eventType, actorType, actorID string, payloadHash string, policyDecision, toolName string, spendDelta float64, verificationState degraded.VerificationState, reason string) {
+	event := ProofEvent{
+		Sequence:          len(m.Events) + 1,
+		EventType:         eventType,
+		ActorType:         actorType,
+		ActorID:           actorID,
+		PayloadHash:       payloadHash,
+		PolicyDecision:    policyDecision,
+		ToolName:          toolName,
+		SpendDelta:        spendDelta,
+		VerificationState: verificationState,
+		Reason:            reason,
+		CreatedAt:         time.Now().UTC(),
+	}
+	m.Events = append(m.Events, event)
+	}
+
+	func nullableTime(value *time.Time) interface{} {
+		if value == nil {
+			return nil
+		}
+		return *value
+	}
+
+	const postgresSchema = `
 CREATE SEQUENCE IF NOT EXISTS mission_numbers START WITH 1;
 
 CREATE TABLE IF NOT EXISTS missions (
