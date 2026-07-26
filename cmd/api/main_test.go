@@ -157,6 +157,18 @@ func TestHandleMissionRoutes(t *testing.T) {
 		}
 	})
 
+	t.Run("GET /v1/missions/{id}/audit", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/missions/"+m.ID+"/audit", nil)
+		rr := httptest.NewRecorder()
+		srv.handleMissionRoutes(rr, req)
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		}
+		if got := rr.Header().Get("Content-Disposition"); got == "" {
+			t.Error("expected audit export content disposition")
+		}
+	})
+
 	t.Run("Invalid Route", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/missions/"+m.ID+"/invalid", nil)
 		rr := httptest.NewRecorder()

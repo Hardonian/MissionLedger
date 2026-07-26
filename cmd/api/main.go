@@ -175,6 +175,8 @@ func (s *apiServer) handleMissionRoutes(w http.ResponseWriter, r *http.Request) 
 		s.handleMissionToolCalls(w, r, missionID)
 	case "proofpack":
 		s.handleMissionProofpack(w, r, missionID)
+	case "audit":
+		s.handleMissionAudit(w, r, missionID)
 	default:
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "not found"})
 	}
@@ -269,6 +271,31 @@ func (s *apiServer) handleMissionProofpack(w http.ResponseWriter, r *http.Reques
 	resp.Summary.BudgetUsedUSD = m.BudgetUsedUSD
 	resp.Summary.BudgetRemainUSD = m.BudgetUSD - m.BudgetUsedUSD
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *apiServer) handleMissionAudit(w http.ResponseWriter, r *http.Request, missionID string) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	m, ok, err := s.store.GetMission(missionID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "mission not found"})
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+missionID+`-audit.json"`)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"format":      "missionledger-audit-v1",
+		"mission_id":  missionID,
+		"state":       m.State,
+		"approved_by": m.ApprovedBy,
+		"approved_at": m.ApprovedAt,
+		"events":      m.Events,
+	})
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {
