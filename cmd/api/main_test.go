@@ -260,6 +260,19 @@ func TestHandleMissionRoutes_BaseRouteErrors(t *testing.T) {
 	}
 }
 
+func TestHandleMissions_InvalidLimit(t *testing.T) {
+	srv := &apiServer{store: mission.NewStore()}
+	for _, raw := range []string{"0", "-1", "not-a-number"} {
+		t.Run(raw, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v1/missions?limit="+raw, nil)
+			rr := httptest.NewRecorder()
+			srv.handleMissions(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("invalid limit returned %d, want %d", rr.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
 
 func TestHandleMissionRoutes_Errors(t *testing.T) {
 	srv := &apiServer{store: mission.NewStore()}
@@ -275,11 +288,7 @@ func TestHandleMissionRoutes_Errors(t *testing.T) {
 	}
 
 	// Test ToolCall on non-existent mission
-	tcPayload := toolCallRequest{
-		ToolName: "read_file",
-		ActorID:  "actor-1",
-		CostUSD:  1.0,
-	}
+	tcPayload := toolCallRequest{ToolName: "read_file", ActorID: "actor-1", CostUSD: 1.0}
 	tcBody, _ := json.Marshal(tcPayload)
 	req = httptest.NewRequest(http.MethodPost, "/v1/missions/non-existent/tool-calls", bytes.NewBuffer(tcBody))
 	rr = httptest.NewRecorder()

@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "product": "MissionLedger",
+  "scope": "local_repository",
+  "commands": {
+    "status": "./scripts/status.sh",
+    "doctor": "./scripts/doctor.sh",
+    "verify": "./scripts/verify.sh",
+    "smoke": "./scripts/smoke.sh"
+  },
+  "evidence": {"health": "/healthz", "proofpack": "/v1/missions/{id}/proofpack", "verification": "go test ./... + go build + web build + smoke"},
+  "rollback": {"automatic": false, "operator_action_required": true, "scope": "process_and_verified_source_or_database_restore"},
+  "claims": {"auth": false, "tenancy_enforcement": false, "real_tool_mediation": false, "customer_proof": false, "revenue_proof": false}
+}

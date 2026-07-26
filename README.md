@@ -69,6 +69,18 @@ Run smoke demo only:
 ./scripts/smoke.sh
 ```
 
+## Operator Status, Doctor, and Verification
+
+MissionLedger is a local-first scaffold. It currently has no authentication, tenancy enforcement, or real tool-gateway mediation; do not treat the demo API as a production deployment.
+
+```bash
+./scripts/status.sh   # requires a running API; emits JSON
+./scripts/doctor.sh   # local prerequisites, no mutations
+./scripts/verify.sh   # Go tests/build, web build, and smoke failure-path exercise
+```
+
+Proofpacks are evidence of the local API's recorded event chain, not proof of customer use or revenue. Rollback is limited to stopping the process and restoring the previously verified source/database version; no automatic data rollback is implemented.
+
 ## Demo story
 
 1. Create a mission with `read_file` and `terminal` in scope.
