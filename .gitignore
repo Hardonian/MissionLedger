@@ -27,3 +27,8 @@ web/out/
 .env.local
 .tmp/
 *.log
+__pycache__/
+node_modules/
+build/
+.pytest_cache/
+*.pyc
