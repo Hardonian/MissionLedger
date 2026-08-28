@@ -21,17 +21,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
-PORT="$PORT" go run ./cmd/api >"$LOG_FILE" 2>&1 &
+env -u DATABASE_URL PORT="$PORT" go run ./cmd/api >"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
-for _ in $(seq 1 40); do
+ready=false
+for _ in $(seq 1 120); do
   if curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
+    ready=true
     break
+  fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "missionledger API exited before becoming healthy" >&2
+    sed -n '1,160p' "$LOG_FILE" >&2
+    exit 1
   fi
   sleep 0.25
 done
 
-curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null
+if [[ "$ready" != true ]]; then
+  echo "missionledger API did not become healthy within 30 seconds" >&2
+  sed -n '1,160p' "$LOG_FILE" >&2
+  exit 1
+fi
 
 CREATE_RESPONSE=$(curl -fsS -X POST "http://127.0.0.1:${PORT}/v1/missions"   -H 'Content-Type: application/json'   -d '{
     "tenant_id": "demo-tenant",
