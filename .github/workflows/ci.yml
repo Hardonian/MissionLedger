@@ -55,17 +55,17 @@ jobs:
           name: sbom
           path: sbom.spdx.json
       - name: Semgrep security scan
-        uses: returntocorp/semgrep@main
-        with:
-          config: >-
-            p/ci
-            p/secrets
-            p/audit-trail
-            p/command-injection
-            p/path-traversal
-            p/weak-crypto
-            p/sql-injection
-            p/xss
+        run: |
+          pipx install semgrep
+          semgrep scan \
+            --config p/ci \
+            --config p/secrets \
+            --config p/audit-trail \
+            --config p/command-injection \
+            --config p/path-traversal \
+            --config p/weak-crypto \
+            --config p/sql-injection \
+            --config p/xss
 
   reproducibility:
     runs-on: ubuntu-latest
