@@ -16,21 +16,23 @@ jobs:
         with:
           node-version: 'lts/*'
           cache: 'npm'
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - name: Build & Test
-        run: |
-          make build 2>/dev/null || cargo build --workspace 2>/dev/null || go build ./... 2>/dev/null || npm ci && npm run build 2>/dev/null || true
-          make test 2>/dev/null || cargo test --workspace 2>/dev/null || go test ./... 2>/dev/null || npm test 2>/dev/null || true
-      - name: Lint
+          cache-dependency-path: web/package-lock.json
+      - name: Go test
+        run: go test ./...
       - name: Go vet
         run: go vet ./...
+      - name: Go build
+        run: go build ./...
       - name: Go vulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
-        run: |
-          make lint 2>/dev/null || cargo clippy --workspace --all-targets -- -D warnings 2>/dev/null || golangci-lint run 2>/dev/null || npm run lint 2>/dev/null || true
+      - name: Web install
+        run: npm --prefix web ci
+      - name: Web audit
+        run: npm --prefix web audit --audit-level=high
+      - name: Web build
+        run: npm --prefix web run build
+      - name: API smoke
+        run: ./scripts/smoke.sh
 
   security:
     runs-on: ubuntu-latest
@@ -53,26 +55,32 @@ jobs:
           name: sbom
           path: sbom.spdx.json
       - name: Semgrep security scan
-        uses: returntocorp/semgrep@main
-        with:
-          config: >-
-            p/ci
-            p/secrets
-            p/audit-trail
-            p/command-injection
-            p/path-traversal
-            p/weak-crypto
-            p/sql-injection
-            p/xss
+        run: |
+          pipx install semgrep
+          semgrep scan \
+            --config p/ci \
+            --config p/secrets \
+            --config p/audit-trail \
+            --config p/command-injection \
+            --config p/path-traversal \
+            --config p/weak-crypto \
+            --config p/sql-injection \
+            --config p/xss
 
   reproducibility:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build in clean environment
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+      - name: Compare deterministic Go builds
         run: |
-          make build 2>/dev/null || cargo build --release --workspace --locked 2>/dev/null || go build -trimpath -ldflags="-s -w" ./... 2>/dev/null || npm ci && npm run build 2>/dev/null || true
-          find . -name "*.exe" -o -name "*.bin" -o -name "dist" -type f -executable 2>/dev/null | head -5 | xargs -I{} sha256sum {} > build-hash.txt || echo "no binaries" > build-hash.txt
+          go build -trimpath -buildvcs=false -ldflags="-s -w" -o /tmp/missionledger-api-1 ./cmd/api
+          go build -trimpath -buildvcs=false -ldflags="-s -w" -o /tmp/missionledger-api-2 ./cmd/api
+          cmp /tmp/missionledger-api-1 /tmp/missionledger-api-2
+          sha256sum /tmp/missionledger-api-1 > build-hash.txt
       - uses: actions/upload-artifact@v4
         with:
           name: build-hash
