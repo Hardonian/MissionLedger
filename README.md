@@ -2,9 +2,9 @@
 
 MissionLedger is a governed agent execution substrate for AI workflows that need deterministic policy, explicit approvals, budget enforcement, degraded-state truth, and exportable proofpacks.
 
-<!-- BEGIN: EPYC GPU STACK -->
-![EPYC GPU Stack — private, local-first inference fabric](assets/epyc-gpu-fabric.svg)
-<!-- END: EPYC GPU STACK -->
+<!-- BEGIN: REPO HERO -->
+![Repository hero generated locally on the EPYC GPU stack](assets/repo-hero.png)
+<!-- END: REPO HERO -->
 
 Current truth:
 - Local-first scaffold exists.
