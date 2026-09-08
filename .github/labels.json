@@ -1,0 +1,24 @@
+{
+  "labels": [
+    {
+      "name": "good first issue",
+      "color": "7057ff"
+    },
+    {
+      "name": "help wanted",
+      "color": "a2c9ff"
+    },
+    {
+      "name": "bug",
+      "color": "d73a4a"
+    },
+    {
+      "name": "documentation",
+      "color": "006b75"
+    },
+    {
+      "name": "enhancement",
+      "color": "a2c9ff"
+    }
+  ]
+}

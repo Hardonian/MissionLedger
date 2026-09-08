@@ -1,0 +1,14 @@
+{
+  "name": "missionledger",
+  "version": "0.1.0",
+  "description": "Mission ledger - mission and documentation tracking",
+  "private": true,
+  "packageManager": "pnpm@11.6.0",
+  "scripts": {
+    "build": "go build ./...",
+    "test": "go test ./..."
+  },
+  "go": {
+    "mod": "missionledger"
+  }
+}
