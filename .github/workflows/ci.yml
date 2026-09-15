@@ -50,7 +50,7 @@ jobs:
         with:
           format: spdx-json
           output-file: sbom.spdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.spdx.json
@@ -81,7 +81,7 @@ jobs:
           go build -trimpath -buildvcs=false -ldflags="-s -w" -o /tmp/missionledger-api-2 ./cmd/api
           cmp /tmp/missionledger-api-1 /tmp/missionledger-api-2
           sha256sum /tmp/missionledger-api-1 > build-hash.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: build-hash
           path: build-hash.txt
@@ -95,7 +95,7 @@ jobs:
         run: |
           docker build --no-cache --pull -t $(basename ${{ github.repository }}):local .
           docker save $(basename ${{ github.repository }}):local | sha256sum > docker-hash.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docker-hash
           path: docker-hash.txt
